@@ -1,5 +1,7 @@
 # firefox-hardened-setup
 
+not to forget - Make hardened the default profile (simplest, my recommendation). launch once via terminal with -P hardened, open about:profiles, click "Set as default profile" on hardened. 
+
 Deploys Firefox on macOS with a LibreWolf-like privacy configuration, using a
 locally vendored (pre-reviewed) [arkenfox user.js](https://github.com/arkenfox/user.js).
 No runtime download of the configuration — the only network activity is
