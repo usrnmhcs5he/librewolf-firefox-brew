@@ -59,6 +59,42 @@ Fetch the new release once, diff against the vendored copy, review, replace
 `user.js`, delete `user.js.sha256` (re-recorded on next run), re-run the
 script on each Mac. Never let the script fetch it for you — that is the point.
 
+## Persistent container logins (optional)
+
+arkenfox wipes cookies and site storage on every Firefox exit
+(`privacy.clearOnShutdown_v2.cookiesAndStorage = true`, item 2815). Container
+*identities* survive, but logins inside them do not persist across restarts.
+If you want container logins to survive, pick ONE of the following:
+
+**Option A — pref override (all sites keep cookies):**
+Add this line and restart Firefox:
+
+```js
+user_pref("privacy.clearOnShutdown_v2.cookiesAndStorage", false);
+```
+
+- *Before deploying:* add it to the override block inside the setup script,
+  so every machine gets it.
+- *After the script has already run:* append it to the very END of the
+  profile's `user.js` (`~/Library/Application Support/Firefox/Profiles/`
+  `<random>.hardened/user.js`) — last write wins.
+- **Do NOT use about:config for this** — the profile `user.js` re-applies
+  every pref on startup and will silently revert the change.
+- Re-running the setup script regenerates the profile `user.js`, wiping any
+  manually appended lines — re-add them, or put the line in the script's
+  override block instead.
+
+Other sanitize-on-exit categories (cache etc.) remain active; only cookie
+persistence changes.
+
+**Option B — per-site exceptions (arkenfox-sanctioned, selective):**
+While on the site: Page Info (Cmd+I) > Permissions > Set Cookies > Allow.
+Manage them under Settings > Privacy & Security > Cookies and Site Data >
+Manage Exceptions. Item 2815 respects "Allow" exceptions, so only chosen
+sites survive shutdown. For cross-domain logins add both domains (e.g.
+`youtube.com` **and** `accounts.google.com`). Note: excepted sites also lose
+partitioning, so keep the list short.
+
 ## Notes
 
 - Overrides are appended at the end of `user.js`; last write wins. Edit the
@@ -71,6 +107,8 @@ script on each Mac. Never let the script fetch it for you — that is the point.
 
 ## Changelog
 
+- **v3** — documented manual arkenfox acquisition (script header + error
+  message); README: persistent container logins option
 - **v2** — vendored local `user.js` with SHA-256 pinning; runtime download removed
 - **v1** — initial release; arkenfox fetched from GitHub at runtime
 
