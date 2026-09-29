@@ -1,232 +1,191 @@
-# firefox-hardened-setup.sh (v10)
+<div align="center">
 
-Per-user, no-sudo hardening of Firefox on macOS approximating a
-LibreWolf-like privacy posture, built on a **vendored, locally reviewed
-arkenfox `user.js`**, with **portable replication bundles** (including
-container identities) and **independent verification** of the installed app
+# 🦊 firefox-hardened-setup
+
+**Per-user, no-sudo hardening of Firefox on macOS with a LibreWolf-like privacy posture, built on a vendored, locally reviewed arkenfox `user.js`.**
+
+![Bash 3.2+](https://img.shields.io/badge/bash-3.2%2B-4EAA25?logo=gnubash&logoColor=white)
+![macOS](https://img.shields.io/badge/macOS-no%20sudo-000000?logo=apple&logoColor=white)
+![arkenfox](https://img.shields.io/badge/arkenfox-144.0-orange)
+![Version](https://img.shields.io/badge/version-10-blue)
+
+</div>
+
+Configures, hardens, verifies and replicates Firefox. It does **not** install or
+update the app. Portable bundles carry your setup (including container
+identities) to other Macs, and the installed app is independently verified
 against Apple's signature chain.
 
-**App lifecycle model (v10+):** Firefox is installed once from Mozilla's
-official DMG by an **admin account** and then **updates itself natively**.
-Because the app bundle is not writable by the everyday standard user, macOS
-shows the Firefox helper authorization dialog at each update — authenticate
-it with the admin account. Homebrew is no longer part of the Firefox
-lifecycle. This script configures, hardens, verifies, and replicates; it
-does not install or update the app.
+> [!IMPORTANT]
+> **Update model.** Firefox is installed once from Mozilla's official DMG by an
+> **admin account**, then updates itself. The bundle is deliberately not
+> writable by your everyday user, so macOS shows the **Firefox helper
+> authorization dialog** on **every** update: authenticate with the admin
+> account. Do not postpone it, since a stale browser is the worst component to
+> leave unpatched. Homebrew is no longer part of the lifecycle.
+>
+> If an update wedges: quit Firefox, delete `~/Library/Caches/Mozilla/`,
+> relaunch, retry.
 
----
+## ✨ Features
 
-## !!! CRITICAL — UPDATE MODEL !!!
+- **Vendored arkenfox `user.js`**: you download and review it once. It is
+  hash-pinned, and the script never fetches it.
+- **LibreWolf-aligned overrides**: RFP, letterboxing, WebGL off, DoH off
+  (see [Overrides](#-overrides)).
+- **Signature verification**: `codesign`, Mozilla Team ID and Gatekeeper checks
+  on every run.
+- **Ownership check**: reports whether the app bundle is protected from your user.
+- **Dedicated `hardened` profile** with user-domain policies (telemetry,
+  studies and Pocket off).
+- **Replication bundles**: script, `user.js`, pin and container identities,
+  covered by a SHA-256 manifest.
+- **Stock macOS only**: bash 3.2, no sudo, no Homebrew.
 
-Firefox self-updates with Mozilla-signed updates. The download happens
-silently in the background under your standard account; at install time
-macOS shows the **Firefox helper authorization dialog** — enter your
-**admin account's** credentials there. The prompt appears on **every**
-update while the bundle stays non-writable to your user; that recurrence is
-the deliberate cost of the tamper-protection model. **Do not postpone these
-dialogs** — an unpatched browser is the worst component to leave stale.
+## 📦 Prerequisites
 
-If an update wedges (helper prompt loops or stalls): quit Firefox, delete
-`~/Library/Caches/Mozilla/`, relaunch, retry.
+### 1. Firefox (once per machine, by an admin)
 
-`./firefox-hardened-setup.sh update` tells you whether you are behind
-Mozilla's latest release; `verify` re-checks the signature chain — run it
-after each update.
-
-## Files
-
-| File | Role |
-|---|---|
-| `firefox-hardened-setup.sh` | The script (single executable). |
-| `user.js` | Vendored arkenfox template. **You** download and review it once; the script never fetches it. |
-| `user.js.sha256` | Pin of the reviewed `user.js` (trust-on-first-use; auto-recorded on first run). |
-| `containers.json` | Optional. Container identities restored into the profile by `setup` (placed here by `unpack`, or by you). |
-| `ff-hardened-bundle-YYYYMMDD.tar.gz` | Output of `pack`: script + user.js + hash + containers + SHA-256 manifest. |
-
-## Trust chain
-
-**1. Install artifact = Mozilla's official DMG, verified by you.** Download
-from `https://www.mozilla.org/firefox/`, then check it against Mozilla's
-published per-release checksums before installing (see *Verifying a
-downloaded DMG* below). No intermediary packaging layer remains in the
-chain.
-
-**2. Updates = Firefox's native updater.** Mozilla-signed update packages,
-applied by the updater with admin authorization via the macOS helper
-dialog. The standard user cannot modify the bundle, so nothing running as
-that user can ride along.
-
-**3. Independent signature verification (automatic).** `setup`, `update`
-and `verify` all run `codesign --verify --deep --strict`, require the
-signer's **Team ID `43AQ936H96`** ("Developer ID Application: Mozilla
-Corporation") and Gatekeeper/notarization acceptance. A swapped, patched or
-re-signed bundle hard-fails these regardless of how it got there.
-Cross-check the Team ID constant once yourself against a DMG fetched
-directly from mozilla.org: `codesign -d --verbose=2 /Volumes/Firefox/Firefox.app`.
-
-**4. Ownership doctrine — the core of this model.** The bundle must **not**
-be writable by the everyday user: `root:admin` after the initial chown, or
-admin-owned. That is what (a) blocks silent in-place tampering by anything
-running as your user, and (b) forces the admin dialog on updates. The
-script checks and reports this posture on every `setup`/`update`/`verify`.
-Note: Mozilla's helper validates and may normalize bundle ownership during
-the **first** elevated update (an admin-owned result is normal). Either
-outcome preserves the property that matters — after the first update, run
-`ls -ld /Applications/Firefox.app` and `verify` to confirm the bundle is
-still not writable by your user.
-
-**5. Vendored `user.js`** — your reviewed local copy is the anchor,
-hash-pinned via `user.js.sha256`; the script refuses to fetch it and aborts
-on any drift.
-
-**6. Bundles** — `manifest.sha256` over every file; `unpack` aborts on
-mismatch. Integrity, not authenticity: transport bundles yourself.
-
-## APP prerequisite (per machine, once, by an ADMIN)
-
-1. Download the Firefox DMG from `https://www.mozilla.org/firefox/`.
-2. Verify it (next section).
+1. Download the DMG from <https://www.mozilla.org/firefox/>.
+2. Verify it (below).
 3. Drag `Firefox.app` to `/Applications` from the admin account.
 4. With Firefox closed: `sudo chown -R root:admin /Applications/Firefox.app`
-5. Confirm from the standard account:
-   `[ -w /Applications/Firefox.app ] && echo writable || echo protected`
-   must print `protected`.
+5. From the standard account, this must print `protected`:
+   ```bash
+   [ -w /Applications/Firefox.app ] && echo writable || echo protected
+   ```
 
-### Verifying a downloaded DMG
+**Verify the DMG** (version e.g. `141.0`):
 
-With the DMG's version number (e.g. `141.0`):
-
-```
+```bash
 shasum -a 256 ~/Downloads/Firefox*.dmg
 curl -fsSL "https://ftp.mozilla.org/pub/firefox/releases/<VER>/SHA256SUMS" | grep <the-hash>
 ```
 
-A match against a `mac/<lang>/Firefox <VER>.dmg` line proves a
-byte-identical official Mozilla artifact. (Applies to release DMGs from the
-`releases/` path; Windows-style stub installers embed per-download tokens
-and never hash-match — irrelevant here.) Optional extra rigor: verify
-`SHA256SUMS.asc` with GPG against Mozilla's release key.
+A match on a `mac/<lang>/Firefox <VER>.dmg` line proves a byte-identical
+official artifact. Optionally verify `SHA256SUMS.asc` with GPG against
+Mozilla's release key.
 
-## arkenfox prerequisite (one-time, deliberate)
+### 2. arkenfox `user.js` (once, deliberate)
 
-Download the arkenfox template yourself — current release tag `144.0`, and
-the **only official sources** are `github.com/arkenfox/user.js` and
-`arkenfox.github.io/gui/` — review it, place it as `user.js` next to the
-script. With a bundle from another Mac, `unpack` restores the reviewed copy
-plus its hash pin instead.
+Download release `144.0` from the only official sources,
+`github.com/arkenfox/user.js` or `arkenfox.github.io/gui/`. Review it and place
+it as `user.js` next to the script. With a bundle from another Mac, `unpack`
+restores the reviewed copy and its pin instead.
 
-## Commands
+## 🚀 Usage
 
-```
-./firefox-hardened-setup.sh                  # setup (default)
-./firefox-hardened-setup.sh setup
-./firefox-hardened-setup.sh update           # staleness check + verify
-./firefox-hardened-setup.sh verify
-./firefox-hardened-setup.sh pack [out.tar.gz]
-./firefox-hardened-setup.sh unpack <bundle.tar.gz>
+Save the script as `firefox-hardened-setup.sh` (the name used throughout):
+
+```bash
+chmod +x firefox-hardened-setup.sh
+./firefox-hardened-setup.sh [command]
 ```
 
-**setup** — checks Firefox is present (fails with install guidance if not)
-and reports the bundle's writability posture; verifies the Apple signature
-chain; applies the user-domain policies (telemetry, studies, Pocket off —
-confirm in `about:policies`) and **removes the old `DisableAppUpdate`
-policy** (migration from v4–v9); creates the dedicated `hardened` profile;
-applies vendored `user.js` + overrides; installs container identities
-(existing profile `containers.json` is never overwritten → bundle copy →
-LibreWolf migration). If Homebrew's Caskroom still lists a firefox cask,
-setup prints the safe de-registration command — metadata only; **never run
-`brew uninstall --cask firefox`** in this model, it would try to delete the
-app itself. Idempotent. After first launch, set the profile as default in
-`about:profiles` if you launch from the Dock/Finder.
+| Command | What it does |
+|---------|--------------|
+| `setup` (default) | Checks Firefox is present, verifies the signature chain, applies policies, creates the `hardened` profile, applies `user.js` + overrides, restores containers. Idempotent. |
+| `update` | Verifies the signature chain, then compares your version with Mozilla's latest (one HTTPS request to `product-details.mozilla.org`). If behind: **Firefox menu → About Firefox**, authenticate, re-run `verify`. A failed fetch is only a warning. |
+| `verify` | Signature chain, Mozilla Team ID, Gatekeeper and writability posture. Run after every update. |
+| `pack [out.tar.gz]` | Verifies `user.js`, snapshots `containers.json` from the live profile, writes a manifest and the bundle. |
+| `unpack <bundle>` | Verifies the manifest, restores files next to the script, then runs `setup`. |
 
-**update** — verifies the signature chain, then makes one announced HTTPS
-request to `product-details.mozilla.org` (Mozilla's public release-info
-JSON) and compares the installed version against `LATEST_FIREFOX_VERSION`.
-If behind: update via **Firefox menu → About Firefox**, authenticate the
-helper dialog with the admin account, then re-run `verify`. A failed fetch
-degrades to a warning (the signature result stands).
+After the first launch, set the profile as default in `about:profiles` if you
+start Firefox from the Dock or Finder. Confirm policies in `about:policies`.
 
-**verify** — signature chain + Mozilla Team ID + Gatekeeper + writability
-posture. The former `verify online` (brew-cache DMG vs SHA256SUMS) is gone
-with brew; DMG verification is now the manual install-time step above.
+`setup` also removes the old `DisableAppUpdate` policy (migration from v4–v9)
+and applies existing-container handling in this order: existing profile
+`containers.json` (never overwritten), then the bundle copy, then LibreWolf
+migration.
 
-**pack / unpack** — unchanged: `pack` verifies `user.js` first, snapshots
-`containers.json` from the live profile, writes a manifest, produces the
-tar.gz; `unpack` verifies the manifest, restores the files next to the
-script, chains into `setup`.
+> [!WARNING]
+> If Homebrew's Caskroom still lists a firefox cask, `setup` prints a safe
+> de-registration command (metadata only). **Never run
+> `brew uninstall --cask firefox`**, because it would try to delete the app.
 
-## Replication workflow
+### Replicating to another Mac
 
-Machine A: `./firefox-hardened-setup.sh pack` → Machine B: **admin installs
-Firefox** (APP prerequisite above) → copy bundle + script → `./firefox-hardened-setup.sh
-unpack ff-hardened-bundle-*.tar.gz` → manual steps the script prints
-(default profile, extensions, `about:policies`, parrot check).
+```
+Machine A: pack  →  Machine B: admin installs Firefox  →  copy bundle + script  →  unpack
+```
 
-## What the bundle does and does not carry
+Then follow the manual steps the script prints: default profile, extensions,
+`about:policies`.
 
-Carries: the script, the reviewed `user.js` + hash pin, and **container
-identities**. Does not carry: bookmarks, history, cookies, logins, data
-inside containers, extensions (install from AMO), and **Multi-Account
-Containers site assignments** (no file export upstream — PR #1533 still
-unmerged; use the extension's Sync or re-create per machine).
+## 📁 Files
 
-## Updating arkenfox later
+| File | Role |
+|------|------|
+| `firefox-hardened-setup.sh` | The script. |
+| `user.js` | Vendored arkenfox template, reviewed by you. |
+| `user.js.sha256` | Pin of the reviewed `user.js`, auto-recorded on first run. |
+| `containers.json` | Optional container identities restored by `setup`. |
+| `ff-hardened-bundle-YYYYMMDD.tar.gz` | Output of `pack`. |
 
-Fetch the new release once (official repo only) → diff against your current
-`user.js` → review → replace the vendored copy → delete `user.js.sha256`
-(re-recorded on next run) → re-run the script → `pack` a fresh bundle.
+A bundle carries the script, `user.js` + pin and container identities. It does
+**not** carry bookmarks, history, cookies, logins, container data, extensions
+(install from AMO) or Multi-Account Containers site assignments (no upstream
+export; use the extension's Sync or re-create them).
 
-## Forcing a container restore on an existing profile
+## 🛡️ Trust chain
 
-`setup` never overwrites an existing profile `containers.json`. To force:
-quit Firefox, delete it from the `*.hardened` profile directory, re-run.
+| # | Anchor | Guarantee |
+|---|--------|-----------|
+| 1 | **Official DMG** | Checked by you against Mozilla's published checksums. |
+| 2 | **Native updater** | Mozilla-signed updates applied with admin authorization, so nothing running as your user can ride along. |
+| 3 | **Signature check** | `codesign --verify --deep --strict`, Team ID `43AQ936H96` ("Developer ID Application: Mozilla Corporation") and Gatekeeper/notarization on `setup`, `update` and `verify`. A swapped, patched or re-signed bundle hard-fails. |
+| 4 | **Ownership** | The bundle must not be writable by your user (`root:admin` or admin-owned). This blocks silent tampering and forces the admin dialog on updates. |
+| 5 | **Vendored `user.js`** | Hash-pinned. Any drift aborts. |
+| 6 | **Bundles** | `manifest.sha256` over every file, and `unpack` aborts on mismatch. Integrity, not authenticity, so transport bundles yourself. |
 
-## Overrides applied on top of arkenfox v144 (LibreWolf alignment)
+Cross-check the Team ID once against a DMG from mozilla.org:
+`codesign -d --verbose=2 /Volumes/Firefox/Firefox.app`
 
-Since arkenfox v128 the base ships FPP (via ETP Strict) and leaves RFP,
-letterboxing and WebGL-off inactive. LibreWolf enables RFP, so the
-overrides opt in:
+Mozilla's helper may normalize ownership during the **first** elevated update
+(an admin-owned result is normal). After it, run `ls -ld /Applications/Firefox.app`
+and `verify` to confirm the bundle is still not writable by your user.
 
-- `privacy.resistFingerprinting = true` — LibreWolf default. Trade-offs: a
-  GMT-like timezone, light-theme preference, canvas prompts, letterbox
-  margins. To fall back to arkenfox's FPP default, remove this line and the
-  letterboxing line together.
-- `privacy.resistFingerprinting.letterboxing = true` — only coherent
-  alongside RFP.
-- `webgl.disabled = true` — LibreWolf default.
-- `browser.safebrowsing.downloads.remote.enabled = false` — also active in
-  arkenfox 0403; kept as defense-in-depth.
-- `network.trr.mode = 5` — DoH hard off; DNS enforced at the network layer.
-- `browser.startup.page = 3` — session restore kept (LibreWolf wipes).
-- History is already kept by arkenfox v144's `clearOnShutdown_v2` defaults —
-  no override needed.
-- `privacy.clearOnShutdown_v2.cookiesAndStorage = false` — **cookies and
-  site data are kept across restarts** (overrides arkenfox 2815; cache and
-  form data still clear on close). Trade-off: first-party tracking can
-  persist across sessions. Tighter alternative: remove this line and use
-  per-site cookie "Allow" exceptions instead. Any pref decision must live
-  in the override block, never in the Settings UI — the profile `user.js`
-  is re-applied at every startup and overwrites UI changes.
-- Optional commented `privacy.spoof_english = 2` for full LibreWolf-style
-  en-US locale spoofing.
+## ⚙️ Overrides
 
-## Compatibility and verification notes
+Applied on top of arkenfox v144. The base ships FPP (via ETP Strict) and leaves
+RFP, letterboxing and WebGL-off inactive, so these opt in to LibreWolf's
+behavior.
 
-- bash 3.2-safe; no sudo anywhere in the script; Homebrew not required.
-- Uses `shasum -a 256` (incl. `-c`), `tar`, `mktemp -d`, `defaults`,
-  `pgrep`, `codesign`, `spctl`, `curl` — all stock macOS.
-- If Gatekeeper assessments are globally disabled, `spctl` may reject; the
+| Pref | Value | Note |
+|------|-------|------|
+| `privacy.resistFingerprinting` | `true` | Side effects: GMT-like timezone, light theme, canvas prompts, letterbox margins. To fall back to FPP, remove this and the letterboxing line together. |
+| `privacy.resistFingerprinting.letterboxing` | `true` | Only coherent with RFP. |
+| `webgl.disabled` | `true` | LibreWolf default. |
+| `browser.safebrowsing.downloads.remote.enabled` | `false` | Defense-in-depth (also arkenfox 0403). |
+| `network.trr.mode` | `5` | DoH hard off, so DNS is enforced at the network layer. |
+| `browser.startup.page` | `3` | Session restore kept. |
+| `privacy.clearOnShutdown_v2.cookiesAndStorage` | `false` | **Cookies and site data persist** (overrides arkenfox 2815). Cache and form data still clear. Trade-off: first-party tracking can persist. Alternative: drop this line and use per-site "Allow" exceptions. |
+| `privacy.spoof_english` | `2` (commented) | Optional, for full en-US locale spoofing. |
+
+> [!TIP]
+> Make every pref decision in the override block, never the Settings UI. The
+> profile `user.js` is re-applied at each startup and overwrites UI changes.
+
+## 💡 Maintenance
+
+- **Update arkenfox**: fetch the new release from the official repo, diff
+  against your `user.js`, review, replace it, delete `user.js.sha256`
+  (re-recorded on next run), re-run the script and `pack` a fresh bundle.
+- **Force a container restore** on an existing profile: quit Firefox, delete
+  `containers.json` from the `*.hardened` profile directory, re-run `setup`.
+
+## 🔧 Compatibility
+
+- Needs `shasum`, `tar`, `mktemp`, `defaults`, `pgrep`, `codesign`, `spctl`
+  and `curl`, all stock macOS.
+- If Gatekeeper assessments are globally disabled, `spctl` may reject. The
   script treats that as a failure by design.
-- v10 logic (setup without install, policy deletion, ownership posture
-  branches — the protected branch exercised as an unprivileged user,
-  staleness check up-to-date/outdated/fetch-fail, verify, pack/unpack
-  round-trip, manifest/user.js tamper rejection, missing-Firefox guidance,
-  Team-ID/codesign/Gatekeeper negatives) smoke-tested end-to-end with
-  stubbed `defaults`/`codesign`/`spctl`/`curl`/Firefox — 50 checks. The
-  helper-dialog flow itself is macOS behavior verified on-device by you.
+- Smoke-tested end to end with stubbed system tools (50 checks): setup,
+  policy removal, ownership branches, staleness check, verify, pack/unpack
+  round-trip, tamper rejection and codesign/Gatekeeper negatives. The helper
+  dialog flow is macOS behavior that you verify on-device.
 
-## Version history
+## 🕘 Version
 
-Documentation revision 6, paired with script v10. Full change log v1–v10 in
-the header of `firefox-hardened-setup.sh`; the script ends with its version
-marker.
+README revision 6, paired with script **v10**. The full v1–v10 changelog is in
+the script header.
