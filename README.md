@@ -75,8 +75,6 @@ restores the reviewed copy and its pin instead.
 
 ## 🚀 Usage
 
-Save the script as `firefox-hardened-setup.sh` (the name used throughout):
-
 ```bash
 chmod +x firefox-hardened-setup.sh
 ./firefox-hardened-setup.sh [command]
