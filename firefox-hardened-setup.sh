@@ -30,9 +30,9 @@
 # !!! CRITICAL - UPDATE MODEL (v10+) !!!
 #   The app bundle is not writable by this standard user, so updates need
 #   admin authority. RELIABLE PATH (v12): quit Firefox, download the current
-#   DMG, verify it (README), drag it over /Applications/Firefox.app with
-#   admin authentication (Finder prompt or Fast User Switching), then run
-#   "verify". SHORTCUT: Firefox's own updater (About Firefox) shows a macOS
+#   DMG, verify it (README), drag it over /Applications/Firefox.app FROM
+#   THE ADMIN ACCOUNT'S OWN SESSION (Fast User Switching; a Finder copy from
+#   the standard session leaves YOU as owner), chown it, then run "verify". SHORTCUT: Firefox's own updater (About Firefox) shows a macOS
 #   helper dialog for the admin password; on some Macs it loops (bouncing
 #   icon, repeated password prompts) - then quit Firefox, delete
 #   ~/Library/Caches/Mozilla/ and use the reliable path. Do NOT leave the
