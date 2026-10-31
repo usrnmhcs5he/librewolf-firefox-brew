@@ -7,7 +7,7 @@
 ![Bash 3.2+](https://img.shields.io/badge/bash-3.2%2B-4EAA25?logo=gnubash&logoColor=white)
 ![macOS](https://img.shields.io/badge/macOS-no%20sudo-000000?logo=apple&logoColor=white)
 ![arkenfox](https://img.shields.io/badge/arkenfox-144.0-orange)
-![Version](https://img.shields.io/badge/version-11-blue)
+![Version](https://img.shields.io/badge/version-12-blue)
 
 </div>
 
@@ -24,8 +24,11 @@ against Apple's signature chain.
 > account. Do not postpone it, since a stale browser is the worst component to
 > leave unpatched. Homebrew is no longer part of the lifecycle.
 >
-> If an update wedges: quit Firefox, delete `~/Library/Caches/Mozilla/`,
-> relaunch, retry.
+> **If the helper dialog loops** (bouncing Dock icon, password asked again
+> and again): quit Firefox, delete `~/Library/Caches/Mozilla/`, relaunch. If
+> it still loops, stop retrying and update the reliable way: an admin
+> reinstalls the current DMG over the app (steps under
+> [Starting over](#starting-over-clean-slate)). The profile is untouched.
 
 ## ✨ Features
 
@@ -87,7 +90,9 @@ chmod +x firefox-hardened-setup.sh
 | `verify` | Signature chain, Mozilla Team ID, Gatekeeper and writability posture. Run after every update. |
 | `pack [out.tar.gz]` | Verifies `user.js`, snapshots `containers.json` from the live profile, writes a manifest and the bundle. |
 | `unpack <bundle>` | Verifies the manifest, restores files next to the script, then runs `setup`. |
-| `cleanup [--remove]` | Finds other Firefox copies on the Mac and lists them with version, signer and owner. With `--remove`, asks per item and moves it to the Trash. See [Cleaning up other copies](#-cleaning-up-other-copies). |
+| `backup [out.tar.gz]` | Archives the `hardened` profile (history, cookies, sessions, logins, extensions, containers, prefs) with a SHA-256 file. Firefox must be closed. |
+| `restore <archive>` | Puts a backup back and registers it as `hardened`. An existing profile folder is moved aside, never deleted. |
+| `cleanup [--remove\|--all]` | Finds other Firefox copies and lists them with version, signer and owner. `--remove` asks per item and moves it to the Trash. `--all` also covers `/Applications/Firefox.app` and the update cache. See [Cleaning up](#-cleaning-up-other-copies). |
 
 After the first launch, set the profile as default in `about:profiles` if you
 start Firefox from the Dock or Finder. Confirm policies in `about:policies`.
@@ -134,6 +139,48 @@ copy in Downloads.
   for you to run from an admin account. Mounted DMGs get an eject command.
 - Needs a terminal and Firefox closed. After a removal, log out and in if
   another program still shows the old copy.
+
+## 💾 Profile backup
+
+Everything you care about lives in the profile **root** folder, shown in
+`about:profiles` (here `~/Library/Application Support/Firefox/Profiles/<id>.hardened`):
+history and bookmarks (`places.sqlite`), cookies, session
+(`sessionstore-backups/`), logins (`logins.json` + `key4.db`), site data and
+container data (`storage/`), extensions, `containers.json`, prefs. The *Local
+Directory* (`~/Library/Caches/Firefox/...`) is cache only and disposable.
+The app itself holds no data, so deleting every Firefox binary does not touch
+the profile.
+
+```bash
+./firefox-hardened-setup.sh backup              # Firefox closed
+./firefox-hardened-setup.sh restore ff-hardened-profile-*.tar.gz
+```
+
+> [!WARNING]
+> The archive contains cookies, logins and history. Keep it on encrypted
+> storage; never commit or upload it. Some data is cleared on exit by design
+> (arkenfox: cache, form data), so not every file will be present.
+
+A profile remembers the newest Firefox that opened it. Installing an **older**
+Firefox than that makes Firefox refuse the profile, so always install the
+current release.
+
+## 🔁 Starting over (clean slate)
+
+1. `./firefox-hardened-setup.sh backup` (Firefox closed), and copy the archive
+   somewhere safe.
+2. `./firefox-hardened-setup.sh cleanup --all` removes every Firefox app
+   (Trash) and the update cache. Admin-owned apps are not removable without
+   sudo, so the script prints the `sudo rm -rf` command for you to run from an
+   admin account.
+3. **As admin**: download the DMG from <https://www.mozilla.org/firefox/>,
+   [verify it](#1-firefox-once-per-machine-by-an-admin), drag `Firefox.app` to
+   `/Applications`, then `sudo chown -R root:admin /Applications/Firefox.app`.
+4. Back in the standard account: `./firefox-hardened-setup.sh verify`, then
+   `setup`. It finds the existing `hardened` profile and keeps its data. If you
+   lost the profile folder, run `restore` first.
+5. Launch once, confirm the profile in `about:profiles`, and run
+   `./firefox-hardened-setup.sh cleanup` to confirm no other copy exists.
 
 ## 📁 Files
 
@@ -210,5 +257,5 @@ behavior.
 
 ## 🕘 Version
 
-README revision 7, paired with script **v11**. The full v1–v11 changelog is in
+README revision 8, paired with script **v12**. The full v1–v12 changelog is in
 the script header.
