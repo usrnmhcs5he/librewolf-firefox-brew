@@ -144,11 +144,14 @@ copy in Downloads.
 1. Quit Firefox.
 2. Download the current DMG from <https://www.mozilla.org/firefox/> and
    [verify it](#1-firefox-once-per-machine-by-an-admin).
-3. Drag `Firefox.app` onto `/Applications` and choose **Replace**. Finder asks
-   for an admin name and password. Alternatively use Fast User Switching to the
-   admin account, do the drag there, and switch back.
+3. **From the admin account's own session** (Fast User Switching, no logout),
+   drag `Firefox.app` onto `/Applications` and choose **Replace**, then run
+   `sudo chown -R root:admin /Applications/Firefox.app` and switch back.
+   Do not do the drag from your standard session: Finder authenticates as admin
+   but makes **you** the owner of the copy, so the bundle ends up writable by
+   your user.
 4. `./firefox-hardened-setup.sh verify`. If it reports the bundle as writable,
-   an admin runs `sudo chown -R root:admin /Applications/Firefox.app`.
+   the ownership step above was missed or wrong. Fix it from an admin session.
 
 **Shortcut (in-app updater)**: Firefox menu → About Firefox downloads in the
 background, and installing shows the macOS helper dialog where you enter the
@@ -227,9 +230,11 @@ export; use the extension's Sync or re-create them).
 Cross-check the Team ID once against a DMG from mozilla.org:
 `codesign -d --verbose=2 /Volumes/Firefox/Firefox.app`
 
-Finder installs and Mozilla's helper may leave the bundle admin-owned rather
-than `root:admin`, which is fine. After any install or update, run `verify` to
-confirm the bundle is not writable by your user.
+An install made from the admin session is admin-owned, which is fine. A copy
+made from your standard user's Finder is owned by **you** even after admin
+authentication, so it must be fixed with `chown` from an admin session. After
+any install or update, run `verify` to confirm the bundle is not writable by
+your user.
 
 ## ⚙️ Overrides
 
