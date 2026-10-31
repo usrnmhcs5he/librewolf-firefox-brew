@@ -17,18 +17,13 @@ identities) to other Macs, and the installed app is independently verified
 against Apple's signature chain.
 
 > [!IMPORTANT]
-> **Update model.** Firefox is installed once from Mozilla's official DMG by an
-> **admin account**, then updates itself. The bundle is deliberately not
-> writable by your everyday user, so macOS shows the **Firefox helper
-> authorization dialog** on **every** update: authenticate with the admin
-> account. Do not postpone it, since a stale browser is the worst component to
-> leave unpatched. Homebrew is no longer part of the lifecycle.
->
-> **If the helper dialog loops** (bouncing Dock icon, password asked again
-> and again): quit Firefox, delete `~/Library/Caches/Mozilla/`, relaunch. If
-> it still loops, stop retrying and update the reliable way: an admin
-> reinstalls the current DMG over the app (steps under
-> [Starting over](#starting-over-clean-slate)). The profile is untouched.
+> **Update model.** Firefox is installed from Mozilla's official DMG with
+> **admin authority**. The bundle is deliberately not writable by your everyday
+> user, which blocks tampering. Updates therefore need admin authority too:
+> the **reliable path is replacing the app with the current DMG**
+> ([Updating](#-updating)), about once a month. Firefox's in-app updater with
+> its admin helper dialog is an optional shortcut that can hang on some Macs.
+> Do not leave the browser stale. Homebrew is no longer part of the lifecycle.
 
 ## ✨ Features
 
@@ -86,7 +81,7 @@ chmod +x firefox-hardened-setup.sh
 | Command | What it does |
 |---------|--------------|
 | `setup` (default) | Checks Firefox is present, verifies the signature chain, applies policies, creates the `hardened` profile, applies `user.js` + overrides, restores containers. Idempotent. |
-| `update` | Verifies the signature chain, then compares your version with Mozilla's latest (one HTTPS request to `product-details.mozilla.org`). If behind: **Firefox menu → About Firefox**, authenticate, re-run `verify`. A failed fetch is only a warning. |
+| `update` | Verifies the signature chain, then compares your version with Mozilla's latest (one HTTPS request to `product-details.mozilla.org`). If behind, see [Updating](#-updating). A failed fetch is only a warning. |
 | `verify` | Signature chain, Mozilla Team ID, Gatekeeper and writability posture. Run after every update. |
 | `pack [out.tar.gz]` | Verifies `user.js`, snapshots `containers.json` from the live profile, writes a manifest and the bundle. |
 | `unpack <bundle>` | Verifies the manifest, restores files next to the script, then runs `setup`. |
@@ -139,6 +134,27 @@ copy in Downloads.
   for you to run from an admin account. Mounted DMGs get an eject command.
 - Needs a terminal and Firefox closed. After a removal, log out and in if
   another program still shows the old copy.
+
+## 🔄 Updating
+
+`./firefox-hardened-setup.sh update` tells you whether you are behind.
+
+**Reliable path (DMG replacement)**, no logout needed and the profile is untouched:
+
+1. Quit Firefox.
+2. Download the current DMG from <https://www.mozilla.org/firefox/> and
+   [verify it](#1-firefox-once-per-machine-by-an-admin).
+3. Drag `Firefox.app` onto `/Applications` and choose **Replace**. Finder asks
+   for an admin name and password. Alternatively use Fast User Switching to the
+   admin account, do the drag there, and switch back.
+4. `./firefox-hardened-setup.sh verify`. If it reports the bundle as writable,
+   an admin runs `sudo chown -R root:admin /Applications/Firefox.app`.
+
+**Shortcut (in-app updater)**: Firefox menu → About Firefox downloads in the
+background, and installing shows the macOS helper dialog where you enter the
+admin password. If it loops (bouncing Dock icon, password asked again and
+again), quit Firefox, delete `~/Library/Caches/Mozilla/`, and use the
+reliable path. Never install an older Firefox than the profile last used.
 
 ## 💾 Profile backup
 
@@ -204,16 +220,16 @@ export; use the extension's Sync or re-create them).
 | 1 | **Official DMG** | Checked by you against Mozilla's published checksums. |
 | 2 | **Native updater** | Mozilla-signed updates applied with admin authorization, so nothing running as your user can ride along. |
 | 3 | **Signature check** | `codesign --verify --deep --strict`, Team ID `43AQ936H96` ("Developer ID Application: Mozilla Corporation") and Gatekeeper/notarization on `setup`, `update` and `verify`. A swapped, patched or re-signed bundle hard-fails. |
-| 4 | **Ownership** | The bundle must not be writable by your user (`root:admin` or admin-owned). This blocks silent tampering and forces the admin dialog on updates. |
+| 4 | **Ownership** | The bundle must not be writable by your user (`root:admin` or admin-owned). This blocks silent tampering and means updates need admin authority. |
 | 5 | **Vendored `user.js`** | Hash-pinned. Any drift aborts. |
 | 6 | **Bundles** | `manifest.sha256` over every file, and `unpack` aborts on mismatch. Integrity, not authenticity, so transport bundles yourself. |
 
 Cross-check the Team ID once against a DMG from mozilla.org:
 `codesign -d --verbose=2 /Volumes/Firefox/Firefox.app`
 
-Mozilla's helper may normalize ownership during the **first** elevated update
-(an admin-owned result is normal). After it, run `ls -ld /Applications/Firefox.app`
-and `verify` to confirm the bundle is still not writable by your user.
+Finder installs and Mozilla's helper may leave the bundle admin-owned rather
+than `root:admin`, which is fine. After any install or update, run `verify` to
+confirm the bundle is not writable by your user.
 
 ## ⚙️ Overrides
 
@@ -253,7 +269,7 @@ behavior.
 - Smoke-tested end to end with stubbed system tools (50 checks): setup,
   policy removal, ownership branches, staleness check, verify, pack/unpack
   round-trip, tamper rejection and codesign/Gatekeeper negatives. The helper
-  dialog flow is macOS behavior that you verify on-device.
+  dialog and Finder install flows are macOS behavior that you verify on-device.
 
 ## 🕘 Version
 

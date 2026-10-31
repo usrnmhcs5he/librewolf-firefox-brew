@@ -8,10 +8,11 @@
 #           LibreWolf, portable pack/unpack bundles for replicating the
 #           setup on additional Macs, and independent verification of the
 #           installed app against Apple's signature chain.
-#           App lifecycle (v10+): Firefox is installed once from Mozilla's
-#           DMG by an ADMIN and then updates ITSELF natively; the macOS
-#           helper dialog asks for admin credentials at each update
-#           (standard-user model). This script does not install the app.
+#           App lifecycle: Firefox is installed from Mozilla's DMG with ADMIN
+#           authority and updated the same way (reliable path: replace the
+#           app with the current DMG; the in-app updater with the macOS
+#           helper dialog is an optional shortcut). This script does not
+#           install or update the app.
 # Target  : macOS (bash 3.2 compatible). Run per-user, no sudo required.
 #
 # Usage   :
@@ -27,13 +28,15 @@
 #   ./firefox-hardened-setup.sh help
 #
 # !!! CRITICAL - UPDATE MODEL (v10+) !!!
-#   Firefox updates ITSELF (native updater, Mozilla-signed updates).
-#   Because the app bundle is not writable by this standard user, macOS
-#   shows the Firefox helper authorization dialog at each update - enter
-#   your ADMIN account's credentials there. Do NOT postpone these dialogs:
-#   an unpatched browser is the worst component to leave stale.
-#   If an update wedges (helper prompt loops/stalls): quit Firefox, delete
-#   ~/Library/Caches/Mozilla/ , relaunch, retry.
+#   The app bundle is not writable by this standard user, so updates need
+#   admin authority. RELIABLE PATH (v12): quit Firefox, download the current
+#   DMG, verify it (README), drag it over /Applications/Firefox.app with
+#   admin authentication (Finder prompt or Fast User Switching), then run
+#   "verify". SHORTCUT: Firefox's own updater (About Firefox) shows a macOS
+#   helper dialog for the admin password; on some Macs it loops (bouncing
+#   icon, repeated password prompts) - then quit Firefox, delete
+#   ~/Library/Caches/Mozilla/ and use the reliable path. Do NOT leave the
+#   browser stale.
 #   "./firefox-hardened-setup.sh update" compares the installed version
 #   against Mozilla's latest release; run "verify" after updates.
 #
@@ -49,8 +52,8 @@
 #     app. Runs automatically at the end of setup, update and verify.
 #   - The app bundle must NOT be writable by this user (root:admin or
 #     admin-owned). That is what blocks silent in-place tampering by
-#     anything running as this user AND forces the admin dialog on
-#     updates. setup checks and reports this.
+#     anything running as this user AND means updates need admin
+#     authority. setup checks and reports this.
 #
 # Deploy  : Machine A (source): run setup once, customise your containers,
 #           then "pack" to produce a bundle. Machine B (target): ADMIN
@@ -179,7 +182,9 @@
 #        including /Applications/Firefox.app plus the update cache for a
 #        clean slate before a fresh admin install; profiles are never
 #        touched. Update-loop fallback documented in the README: reinstall
-#        the current DMG as admin when the helper dialog hangs.
+#        the current DMG as admin when the helper dialog hangs. Messages,
+#        usage and header now present DMG replacement as the primary update
+#        path and the in-app helper dialog as an optional shortcut.
 # =============================================================================
 set -euo pipefail
 
@@ -215,8 +220,8 @@ Usage: ./$SCRIPT_NAME [command]
   update             Staleness check: verifies the app signature, then
                      compares the installed version against Mozilla's
                      latest release (one announced HTTPS request to
-                     product-details.mozilla.org). The update itself runs
-                     inside Firefox (About Firefox) with the admin dialog.
+                     product-details.mozilla.org). To update, replace the app
+                     with the current DMG (README, Updating).
   verify             Verify the installed app: Apple code-signature chain
                      + Mozilla Team ID ($EXPECTED_TEAM_ID) +
                      Gatekeeper/notarization.
@@ -338,13 +343,13 @@ verify_app_signature() {
     # Ownership posture: the bundle must not be writable by this user.
     if [ -w "$APP" ]; then
         warn "The app bundle IS WRITABLE by this user - no tamper protection,"
-        warn "and Firefox will self-update without any admin dialog."
+        warn "and Firefox can self-update without any admin authentication."
         warn "Recommended (from your ADMIN account, with Firefox closed):"
         warn "    sudo chown -R root:admin \"$APP\""
     else
         info "App bundle is not writable by this user (tamper-protected)."
-        info "Updates will show the macOS helper dialog - authenticate with"
-        info "your ADMIN account when it appears."
+        info "Updates need admin authority: replace the app with the current"
+        info "DMG (README, Updating) or use the in-app helper dialog."
     fi
 }
 
@@ -457,10 +462,10 @@ EOF
 
     # --- 7. Summary of remaining manual steps --------------------------------
     printf '\nDone.\n'
-    warn "UPDATE MODEL: Firefox self-updates. When an update installs, macOS"
-    warn "shows the Firefox helper authorization dialog - enter your ADMIN"
-    warn "account's credentials. Do not postpone updates. If one wedges:"
-    warn "quit Firefox, delete ~/Library/Caches/Mozilla/ , relaunch."
+    warn "UPDATE MODEL: updates need admin authority. Reliable path: replace"
+    warn "/Applications/Firefox.app with the current DMG (README, Updating)."
+    warn "The in-app helper dialog is an optional shortcut; if it loops, quit"
+    warn "Firefox, delete ~/Library/Caches/Mozilla/ and use the DMG path."
     printf '\nRemaining one-time manual steps (in Firefox, profile "%s"):\n' "$PROFILE_NAME"
     printf '  1. Launch:  %s -P %s\n' "$FIREFOX_BIN" "$PROFILE_NAME"
     cat <<'EOF'
@@ -487,9 +492,10 @@ EOF
 Replicating to another Mac: run "./firefox-hardened-setup.sh pack" here,
 copy the bundle + this script over, run "unpack <bundle>" there.
 
-UPDATING FIREFOX: native self-update. Check/trigger via Firefox menu >
-About Firefox; authenticate the helper dialog with your ADMIN account.
-"./firefox-hardened-setup.sh update" tells you if you are behind.
+UPDATING FIREFOX: replace the app with the current DMG using admin
+authority (README, Updating). The in-app updater (About Firefox + helper
+dialog) is an optional shortcut. "./firefox-hardened-setup.sh update" tells
+you if you are behind.
 
 Updating arkenfox: fetch the new release ONCE, diff it against your current
 user.js, review, replace the vendored copy, delete user.js.sha256 (it will
@@ -520,9 +526,9 @@ do_update() {
         info "Firefox is up to date."
     else
         warn "Installed $APP_VER != latest $LATEST."
-        warn "Update now: Firefox menu > About Firefox (download runs in the"
-        warn "background; authenticate the helper dialog with your ADMIN"
-        warn "account when it installs). Re-run 'verify' afterwards."
+        warn "Update now: replace the app with the current DMG (README,"
+        warn "Updating), or try Firefox menu > About Firefox (helper dialog)."
+        warn "Re-run 'verify' afterwards."
     fi
 }
 
