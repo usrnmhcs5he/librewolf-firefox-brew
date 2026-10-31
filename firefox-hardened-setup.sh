@@ -8,10 +8,11 @@
 #           LibreWolf, portable pack/unpack bundles for replicating the
 #           setup on additional Macs, and independent verification of the
 #           installed app against Apple's signature chain.
-#           App lifecycle (v10+): Firefox is installed once from Mozilla's
-#           DMG by an ADMIN and then updates ITSELF natively; the macOS
-#           helper dialog asks for admin credentials at each update
-#           (standard-user model). This script does not install the app.
+#           App lifecycle: Firefox is installed from Mozilla's DMG with ADMIN
+#           authority and updated the same way (reliable path: replace the
+#           app with the current DMG; the in-app updater with the macOS
+#           helper dialog is an optional shortcut). This script does not
+#           install or update the app.
 # Target  : macOS (bash 3.2 compatible). Run per-user, no sudo required.
 #
 # Usage   :
@@ -21,17 +22,21 @@
 #   ./firefox-hardened-setup.sh verify           # signature/Team-ID/Gatekeeper
 #   ./firefox-hardened-setup.sh pack [out.tar.gz]# create replication bundle
 #   ./firefox-hardened-setup.sh unpack <bundle>  # verify bundle, restore, setup
-#   ./firefox-hardened-setup.sh cleanup [--remove]  # find/remove other Firefox copies
+#   ./firefox-hardened-setup.sh backup [out.tar.gz] # archive the hardened profile
+#   ./firefox-hardened-setup.sh restore <archive>   # restore a profile backup
+#   ./firefox-hardened-setup.sh cleanup [--remove|--all]  # find/remove Firefox copies
 #   ./firefox-hardened-setup.sh help
 #
 # !!! CRITICAL - UPDATE MODEL (v10+) !!!
-#   Firefox updates ITSELF (native updater, Mozilla-signed updates).
-#   Because the app bundle is not writable by this standard user, macOS
-#   shows the Firefox helper authorization dialog at each update - enter
-#   your ADMIN account's credentials there. Do NOT postpone these dialogs:
-#   an unpatched browser is the worst component to leave stale.
-#   If an update wedges (helper prompt loops/stalls): quit Firefox, delete
-#   ~/Library/Caches/Mozilla/ , relaunch, retry.
+#   The app bundle is not writable by this standard user, so updates need
+#   admin authority. RELIABLE PATH (v12): quit Firefox, download the current
+#   DMG, verify it (README), drag it over /Applications/Firefox.app with
+#   admin authentication (Finder prompt or Fast User Switching), then run
+#   "verify". SHORTCUT: Firefox's own updater (About Firefox) shows a macOS
+#   helper dialog for the admin password; on some Macs it loops (bouncing
+#   icon, repeated password prompts) - then quit Firefox, delete
+#   ~/Library/Caches/Mozilla/ and use the reliable path. Do NOT leave the
+#   browser stale.
 #   "./firefox-hardened-setup.sh update" compares the installed version
 #   against Mozilla's latest release; run "verify" after updates.
 #
@@ -47,8 +52,8 @@
 #     app. Runs automatically at the end of setup, update and verify.
 #   - The app bundle must NOT be writable by this user (root:admin or
 #     admin-owned). That is what blocks silent in-place tampering by
-#     anything running as this user AND forces the admin dialog on
-#     updates. setup checks and reports this.
+#     anything running as this user AND means updates need admin
+#     authority. setup checks and reports this.
 #
 # Deploy  : Machine A (source): run setup once, customise your containers,
 #           then "pack" to produce a bundle. Machine B (target): ADMIN
@@ -170,6 +175,16 @@
 #        prefers /Applications over ~/Applications, so a stale user-level
 #        copy can no longer be the one checked. setup hints at cleanup when
 #        a second copy exists.
+#   v12 - New "backup [out.tar.gz]" (profile archive + SHA-256, Firefox must
+#        be closed, read-back tested, mode 600) and "restore <archive>"
+#        (checksum + path checks, existing profile moved aside, re-registered
+#        via -CreateProfile). "cleanup --all" lists every Firefox app
+#        including /Applications/Firefox.app plus the update cache for a
+#        clean slate before a fresh admin install; profiles are never
+#        touched. Update-loop fallback documented in the README: reinstall
+#        the current DMG as admin when the helper dialog hangs. Messages,
+#        usage and header now present DMG replacement as the primary update
+#        path and the in-app helper dialog as an optional shortcut.
 # =============================================================================
 set -euo pipefail
 
@@ -205,8 +220,8 @@ Usage: ./$SCRIPT_NAME [command]
   update             Staleness check: verifies the app signature, then
                      compares the installed version against Mozilla's
                      latest release (one announced HTTPS request to
-                     product-details.mozilla.org). The update itself runs
-                     inside Firefox (About Firefox) with the admin dialog.
+                     product-details.mozilla.org). To update, replace the app
+                     with the current DMG (README, Updating).
   verify             Verify the installed app: Apple code-signature chain
                      + Mozilla Team ID ($EXPECTED_TEAM_ID) +
                      Gatekeeper/notarization.
@@ -216,11 +231,20 @@ Usage: ./$SCRIPT_NAME [command]
                      $BUNDLE_NAME-YYYYMMDD.tar.gz next to the script.
   unpack <bundle>    Verify a bundle's manifest, restore its files next to
                      this script, then run setup.
-  cleanup [--remove] Find other Firefox copies on this Mac (leftover
+  backup [out.tar.gz]
+                     Archive the "$PROFILE_NAME" profile (history, cookies,
+                     sessions, logins, extensions, containers, prefs) into a
+                     tar.gz with a SHA-256 file. Firefox must be closed.
+  restore <archive>  Put a backup back and register it as "$PROFILE_NAME".
+                     An existing profile folder is moved aside, not deleted.
+  cleanup [--remove|--all]
+                     Find other Firefox copies on this Mac (leftover
                      ~/Applications installs, Nightly/Developer Edition,
                      mounted DMGs, Homebrew cask metadata, Spotlight hits)
                      and list them. With --remove: ask per item, then move
                      it to the Trash. Never touches profiles or data.
+                     --all also includes /Applications/Firefox.app and
+                     the update cache: a clean slate before a fresh install.
   help               Show this text.
 EOF
 }
@@ -319,13 +343,13 @@ verify_app_signature() {
     # Ownership posture: the bundle must not be writable by this user.
     if [ -w "$APP" ]; then
         warn "The app bundle IS WRITABLE by this user - no tamper protection,"
-        warn "and Firefox will self-update without any admin dialog."
+        warn "and Firefox can self-update without any admin authentication."
         warn "Recommended (from your ADMIN account, with Firefox closed):"
         warn "    sudo chown -R root:admin \"$APP\""
     else
         info "App bundle is not writable by this user (tamper-protected)."
-        info "Updates will show the macOS helper dialog - authenticate with"
-        info "your ADMIN account when it appears."
+        info "Updates need admin authority: replace the app with the current"
+        info "DMG (README, Updating) or use the in-app helper dialog."
     fi
 }
 
@@ -438,10 +462,10 @@ EOF
 
     # --- 7. Summary of remaining manual steps --------------------------------
     printf '\nDone.\n'
-    warn "UPDATE MODEL: Firefox self-updates. When an update installs, macOS"
-    warn "shows the Firefox helper authorization dialog - enter your ADMIN"
-    warn "account's credentials. Do not postpone updates. If one wedges:"
-    warn "quit Firefox, delete ~/Library/Caches/Mozilla/ , relaunch."
+    warn "UPDATE MODEL: updates need admin authority. Reliable path: replace"
+    warn "/Applications/Firefox.app with the current DMG (README, Updating)."
+    warn "The in-app helper dialog is an optional shortcut; if it loops, quit"
+    warn "Firefox, delete ~/Library/Caches/Mozilla/ and use the DMG path."
     printf '\nRemaining one-time manual steps (in Firefox, profile "%s"):\n' "$PROFILE_NAME"
     printf '  1. Launch:  %s -P %s\n' "$FIREFOX_BIN" "$PROFILE_NAME"
     cat <<'EOF'
@@ -468,9 +492,10 @@ EOF
 Replicating to another Mac: run "./firefox-hardened-setup.sh pack" here,
 copy the bundle + this script over, run "unpack <bundle>" there.
 
-UPDATING FIREFOX: native self-update. Check/trigger via Firefox menu >
-About Firefox; authenticate the helper dialog with your ADMIN account.
-"./firefox-hardened-setup.sh update" tells you if you are behind.
+UPDATING FIREFOX: replace the app with the current DMG using admin
+authority (README, Updating). The in-app updater (About Firefox + helper
+dialog) is an optional shortcut. "./firefox-hardened-setup.sh update" tells
+you if you are behind.
 
 Updating arkenfox: fetch the new release ONCE, diff it against your current
 user.js, review, replace the vendored copy, delete user.js.sha256 (it will
@@ -501,9 +526,9 @@ do_update() {
         info "Firefox is up to date."
     else
         warn "Installed $APP_VER != latest $LATEST."
-        warn "Update now: Firefox menu > About Firefox (download runs in the"
-        warn "background; authenticate the helper dialog with your ADMIN"
-        warn "account when it installs). Re-run 'verify' afterwards."
+        warn "Update now: replace the app with the current DMG (README,"
+        warn "Updating), or try Firefox menu > About Firefox (helper dialog)."
+        warn "Re-run 'verify' afterwards."
     fi
 }
 
@@ -626,11 +651,80 @@ do_unpack() {
     do_setup
 }
 
+# --- backup / restore ---------------------------------------------------------
+
+do_backup() {
+    local out="${1:-}" base stamp f found missing
+    locate_profile_dir
+    [ -n "$PROFILE_DIR" ] || fail "No *.$PROFILE_NAME profile found in $PROFILE_ROOT"
+    if firefox_running; then fail "Firefox is running. Quit it first (live databases would be copied inconsistently)."; fi
+    base="$(basename "$PROFILE_DIR")"
+    stamp="$(date +%Y%m%d-%H%M%S)"
+    [ -n "$out" ] || out="$SCRIPT_DIR/ff-hardened-profile-$stamp.tar.gz"
+    [ ! -e "$out" ] || fail "Refusing to overwrite existing file: $out"
+
+    info "Profile: $PROFILE_DIR"
+    found=""; missing=""
+    for f in places.sqlite cookies.sqlite key4.db logins.json containers.json \
+             formhistory.sqlite permissions.sqlite prefs.js sessionstore-backups storage extensions; do
+        if [ -e "$PROFILE_DIR/$f" ]; then found="$found $f"; else missing="$missing $f"; fi
+    done
+    info "Contains:$found"
+    if [ -n "$missing" ]; then info "Not present (normal if unused or cleared on exit):$missing"; fi
+
+    umask 077
+    tar -czf "$out" --exclude='parent.lock' --exclude='.parentlock' --exclude='lock' \
+        -C "$PROFILE_ROOT" "$base" || { rm -f "$out"; fail "tar failed."; }
+    tar -tzf "$out" >/dev/null 2>&1 || { rm -f "$out"; fail "Archive failed its read-back test; removed."; }
+    ( cd "$(dirname "$out")" && shasum -a 256 "$(basename "$out")" > "$(basename "$out").sha256" )
+    chmod 600 "$out" "$out.sha256" 2>/dev/null || true
+    info "Backup written: $out ($(du -h "$out" | awk '{print $1}'))"
+    info "SHA-256 file : $out.sha256"
+    warn "This archive holds cookies, logins and history. Store it on encrypted"
+    warn "storage; do not commit or upload it. (Cache in ~/Library/Caches is not"
+    warn "included - it is disposable.)"
+}
+
+do_restore() {
+    local arc="${1:-}" top dest stamp
+    [ -n "$arc" ] && [ -f "$arc" ] || fail "Usage: ./$SCRIPT_NAME restore <archive.tar.gz>"
+    if firefox_running; then fail "Firefox is running. Quit it first."; fi
+    if [ -f "$arc.sha256" ]; then
+        ( cd "$(dirname "$arc")" && shasum -a 256 -c "$(basename "$arc").sha256" >/dev/null 2>&1 ) \
+            || fail "SHA-256 mismatch for $arc - not restoring."
+        info "Archive checksum verified."
+    else
+        warn "No $arc.sha256 next to the archive; integrity not checked."
+    fi
+    top="$(tar -tzf "$arc" 2>/dev/null | head -1 | cut -d/ -f1)"
+    case "$top" in
+        ""|.|..|*[!A-Za-z0-9._-]*) fail "Unexpected archive layout; not restoring." ;;
+    esac
+    case "$top" in *."$PROFILE_NAME") : ;; *) fail "Archive is not a '$PROFILE_NAME' profile backup." ;; esac
+    if tar -tzf "$arc" | grep -Eq '(^/|\.\./)'; then fail "Archive contains unsafe paths; not restoring."; fi
+
+    mkdir -p "$PROFILE_ROOT"
+    dest="$PROFILE_ROOT/$top"
+    if [ -e "$dest" ]; then
+        stamp="$(date +%Y%m%d-%H%M%S)"
+        mv "$dest" "$dest.old-$stamp"
+        info "Existing profile moved aside: $dest.old-$stamp"
+    fi
+    tar -xzf "$arc" -C "$PROFILE_ROOT"
+    info "Restored: $dest"
+
+    locate_firefox_bin
+    "$FIREFOX_BIN" -CreateProfile "$PROFILE_NAME $dest" >/dev/null 2>&1 || true
+    info "Registered as profile '$PROFILE_NAME' (check about:profiles)."
+    info "Next: ./$SCRIPT_NAME setup   (re-applies user.js; data is kept)."
+}
+
 # --- cleanup -----------------------------------------------------------------
 
 CANONICAL_APP="/Applications/Firefox.app"
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 FOUND=""
+INCLUDE_CANON=0
 
 phys_path() { ( cd -P "$1" 2>/dev/null && pwd ) || true; }
 
@@ -642,7 +736,7 @@ add_found() {
     rp="$(phys_path "$p")"
     [ -n "$rp" ] || return 0
     canon="$(phys_path "$CANONICAL_APP")"
-    if [ -n "$canon" ] && [ "$rp" = "$canon" ]; then return 0; fi
+    if [ "$INCLUDE_CANON" = 0 ] && [ -n "$canon" ] && [ "$rp" = "$canon" ]; then return 0; fi
     case "$rp" in "$HOME/.Trash/"*) return 0 ;; esac
     if [ -n "$FOUND" ] && printf '%s\n' "$FOUND" | grep -Fxq -- "$rp"; then return 0; fi
     FOUND="${FOUND:+$FOUND
@@ -672,15 +766,21 @@ do_cleanup() {
     local mode="${1:-}" p bid hits n=0 ans dest bdirs
     case "$mode" in
         ""|--remove) : ;;
-        *) fail "Usage: ./$SCRIPT_NAME cleanup [--remove]" ;;
+        --all) INCLUDE_CANON=1 ;;
+        *) fail "Usage: ./$SCRIPT_NAME cleanup [--remove|--all]" ;;
     esac
 
-    [ -d "$CANONICAL_APP" ] \
-        || fail "Canonical install $CANONICAL_APP not found. Install Firefox first (README) - cleanup never runs without the copy you keep."
-    info "Keeping: $CANONICAL_APP (the admin-installed, hardened copy)."
+    if [ "$INCLUDE_CANON" = 1 ]; then
+        warn "--all: EVERY Firefox app is listed for removal, including $CANONICAL_APP."
+        warn "Your profile is never touched, but run 'backup' first."
+    else
+        [ -d "$CANONICAL_APP" ] \
+            || fail "Canonical install $CANONICAL_APP not found. Install Firefox first (README) - cleanup never runs without the copy you keep. (Starting over? use: cleanup --all)"
+        info "Keeping: $CANONICAL_APP (the admin-installed, hardened copy)."
+    fi
     info "Searching for other Firefox copies (read-only scan)..."
 
-    for p in "$HOME/Applications"/Firefox*.app /Applications/Firefox*.app \
+    for p in "$CANONICAL_APP" "$HOME/Applications"/Firefox*.app /Applications/Firefox*.app \
              "$HOME/Downloads"/Firefox*.app "$HOME/Desktop"/Firefox*.app \
              /Volumes/Firefox*/Firefox*.app; do
         add_found "$p"
@@ -711,7 +811,7 @@ EOF
         printf '%s\n' "$bdirs" | while IFS= read -r p; do warn "      $p"; done
     fi
 
-    if [ "$mode" != "--remove" ]; then
+    if [ "$mode" = "" ]; then
         info "Scan only - nothing was changed. Re-run with --remove to clean up."
         return 0
     fi
@@ -759,6 +859,18 @@ EOF
 $bdirs
 EOF
     fi
+    if [ "$INCLUDE_CANON" = 1 ] && [ -d "$HOME/Library/Caches/Mozilla" ]; then
+        printf '[?] Delete the update cache (stale staged updates): %s ? [y/N] ' "$HOME/Library/Caches/Mozilla"
+        read -r ans </dev/tty || ans=""
+        case "$ans" in
+            y|Y|yes|YES) rm -rf "$HOME/Library/Caches/Mozilla" && info "Update cache removed." ;;
+            *) info "Skipped." ;;
+        esac
+    fi
+    if [ "$INCLUDE_CANON" = 1 ]; then
+        info "Clean slate. Next: install Firefox fresh as ADMIN (README, 'Starting over'),"
+        info "then run: ./$SCRIPT_NAME setup   (your profile is picked up as-is)."
+    fi
     info "Done. If another program still opens a different Firefox, run this"
     info "command again, then log out/in so Launch Services rebuilds its handler list."
 }
@@ -775,7 +887,9 @@ case "$CMD" in
     pack)           do_pack "${1:-}" ;;
     unpack)         do_unpack "${1:-}" ;;
     cleanup)        do_cleanup "${1:-}" ;;
+    backup)         do_backup "${1:-}" ;;
+    restore)        do_restore "${1:-}" ;;
     help|-h|--help) usage ;;
     *)              usage; fail "Unknown command: $CMD" ;;
 esac
-# 11
+# 12
