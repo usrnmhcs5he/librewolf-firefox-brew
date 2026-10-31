@@ -21,6 +21,7 @@
 #   ./firefox-hardened-setup.sh verify           # signature/Team-ID/Gatekeeper
 #   ./firefox-hardened-setup.sh pack [out.tar.gz]# create replication bundle
 #   ./firefox-hardened-setup.sh unpack <bundle>  # verify bundle, restore, setup
+#   ./firefox-hardened-setup.sh cleanup [--remove]  # find/remove other Firefox copies
 #   ./firefox-hardened-setup.sh help
 #
 # !!! CRITICAL - UPDATE MODEL (v10+) !!!
@@ -159,6 +160,16 @@
 #        moved to the README. If brew's Caskroom still lists firefox,
 #        setup prints the safe de-registration command (metadata only;
 #        never brew uninstall). Header, usage, summary, README rewritten.
+#   v11 - New "cleanup [--remove]": finds other Firefox copies (leftover
+#        ~/Applications installs from v4-era brew --appdir, Nightly /
+#        Developer Edition, copies in Downloads/Desktop, mounted DMGs,
+#        Spotlight bundle-ID hits, Homebrew cask metadata) and lists them
+#        with version/signer/owner. --remove asks per item and moves apps to
+#        the Trash (never sudo; admin-owned items get the command to run
+#        yourself; profiles/data untouched). Fix: locate_firefox_bin now
+#        prefers /Applications over ~/Applications, so a stale user-level
+#        copy can no longer be the one checked. setup hints at cleanup when
+#        a second copy exists.
 # =============================================================================
 set -euo pipefail
 
@@ -205,6 +216,11 @@ Usage: ./$SCRIPT_NAME [command]
                      $BUNDLE_NAME-YYYYMMDD.tar.gz next to the script.
   unpack <bundle>    Verify a bundle's manifest, restore its files next to
                      this script, then run setup.
+  cleanup [--remove] Find other Firefox copies on this Mac (leftover
+                     ~/Applications installs, Nightly/Developer Edition,
+                     mounted DMGs, Homebrew cask metadata, Spotlight hits)
+                     and list them. With --remove: ask per item, then move
+                     it to the Trash. Never touches profiles or data.
   help               Show this text.
 EOF
 }
@@ -220,8 +236,8 @@ locate_profile_dir() {
 
 locate_firefox_bin() {
     FIREFOX_BIN=""
-    for CAND in "$HOME/Applications/Firefox.app/Contents/MacOS/firefox" \
-                "/Applications/Firefox.app/Contents/MacOS/firefox"; do
+    for CAND in "/Applications/Firefox.app/Contents/MacOS/firefox" \
+                "$HOME/Applications/Firefox.app/Contents/MacOS/firefox"; do
         if [ -x "$CAND" ] && [ -z "$FIREFOX_BIN" ]; then FIREFOX_BIN="$CAND"; fi
     done
     [ -n "$FIREFOX_BIN" ] || fail "Firefox not found in ~/Applications or /Applications. Install it first (as ADMIN): download the DMG from https://www.mozilla.org/firefox/ , verify it (README), drag to /Applications, then: sudo chown -R root:admin /Applications/Firefox.app - and re-run."
@@ -252,6 +268,9 @@ check_firefox_install() {
     locate_firefox_bin
     APP="${FIREFOX_BIN%/Contents/MacOS/firefox}"
     info "Firefox found: $APP"
+    if [ -d "$HOME/Applications/Firefox.app" ] && [ "$APP" != "$HOME/Applications/Firefox.app" ]; then
+        warn "A second copy exists in ~/Applications. Run: ./$SCRIPT_NAME cleanup"
+    fi
     # If Homebrew still thinks it manages Firefox, say how to de-register
     # safely. NEVER run 'brew uninstall --cask firefox' in this model -
     # it would try to delete the app itself.
@@ -607,6 +626,143 @@ do_unpack() {
     do_setup
 }
 
+# --- cleanup -----------------------------------------------------------------
+
+CANONICAL_APP="/Applications/Firefox.app"
+LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+FOUND=""
+
+phys_path() { ( cd -P "$1" 2>/dev/null && pwd ) || true; }
+
+# Record a candidate .app (physical path) unless it is the canonical install,
+# already listed, or already in the Trash.
+add_found() {
+    local p="$1" rp canon
+    [ -d "$p" ] || return 0
+    rp="$(phys_path "$p")"
+    [ -n "$rp" ] || return 0
+    canon="$(phys_path "$CANONICAL_APP")"
+    if [ -n "$canon" ] && [ "$rp" = "$canon" ]; then return 0; fi
+    case "$rp" in "$HOME/.Trash/"*) return 0 ;; esac
+    if [ -n "$FOUND" ] && printf '%s\n' "$FOUND" | grep -Fxq -- "$rp"; then return 0; fi
+    FOUND="${FOUND:+$FOUND
+}$rp"
+}
+
+describe_app() {
+    local app="$1" ver team own
+    ver="$(defaults read "$app/Contents/Info" CFBundleShortVersionString 2>/dev/null || echo '?')"
+    team="$(codesign -d --verbose=2 "$app" 2>&1 | awk -F= '/^TeamIdentifier=/{print $2}')"
+    own="$(ls -ld "$app" 2>/dev/null | awk '{print $3}')"
+    printf '    version %s | signer %s | owner %s\n' "$ver" "${team:-none}" "${own:-?}"
+}
+
+# Brew cask metadata dirs for Firefox (metadata only; NEVER brew uninstall).
+brew_firefox_dirs() {
+    local bp d
+    command -v brew >/dev/null 2>&1 || return 0
+    bp="$(brew --prefix 2>/dev/null || true)"
+    [ -n "$bp" ] || return 0
+    for d in "$bp"/Caskroom/firefox "$bp"/Caskroom/firefox@*; do
+        if [ -d "$d" ]; then printf '%s\n' "$d"; fi
+    done
+}
+
+do_cleanup() {
+    local mode="${1:-}" p bid hits n=0 ans dest bdirs
+    case "$mode" in
+        ""|--remove) : ;;
+        *) fail "Usage: ./$SCRIPT_NAME cleanup [--remove]" ;;
+    esac
+
+    [ -d "$CANONICAL_APP" ] \
+        || fail "Canonical install $CANONICAL_APP not found. Install Firefox first (README) - cleanup never runs without the copy you keep."
+    info "Keeping: $CANONICAL_APP (the admin-installed, hardened copy)."
+    info "Searching for other Firefox copies (read-only scan)..."
+
+    for p in "$HOME/Applications"/Firefox*.app /Applications/Firefox*.app \
+             "$HOME/Downloads"/Firefox*.app "$HOME/Desktop"/Firefox*.app \
+             /Volumes/Firefox*/Firefox*.app; do
+        add_found "$p"
+    done
+    for bid in org.mozilla.firefox org.mozilla.firefoxdeveloperedition org.mozilla.nightly; do
+        hits="$(mdfind "kMDItemCFBundleIdentifier == '$bid'" 2>/dev/null || true)"
+        while IFS= read -r p; do
+            if [ -n "$p" ]; then add_found "$p"; fi
+        done <<EOF
+$hits
+EOF
+    done
+    bdirs="$(brew_firefox_dirs)"
+
+    if [ -z "$FOUND" ] && [ -z "$bdirs" ]; then
+        info "No other Firefox copies found. Only $CANONICAL_APP is present."
+        return 0
+    fi
+
+    warn "Other Firefox copies found:"
+    while IFS= read -r p; do
+        if [ -n "$p" ]; then n=$((n+1)); warn "  [$n] $p"; describe_app "$p"; fi
+    done <<EOF
+$FOUND
+EOF
+    if [ -n "$bdirs" ]; then
+        warn "  Homebrew cask metadata (not an app; metadata only):"
+        printf '%s\n' "$bdirs" | while IFS= read -r p; do warn "      $p"; done
+    fi
+
+    if [ "$mode" != "--remove" ]; then
+        info "Scan only - nothing was changed. Re-run with --remove to clean up."
+        return 0
+    fi
+
+    [ -t 0 ] || fail "--remove is interactive and needs a terminal."
+    if firefox_running; then fail "Firefox is running. Quit it first, then re-run."; fi
+
+    info "Apps are moved to the Trash (recoverable). Profiles and data are never touched."
+    while IFS= read -r p; do
+        [ -n "$p" ] || continue
+        case "$p" in
+            /Volumes/*)
+                warn "Mounted volume, not removed: $p"
+                warn "    Eject it:  hdiutil detach \"$(dirname "$p")\""
+                continue ;;
+        esac
+        printf '[?] Move to Trash: %s ? [y/N] ' "$p"
+        read -r ans </dev/tty || ans=""
+        case "$ans" in y|Y|yes|YES) : ;; *) info "Skipped."; continue ;; esac
+        if [ ! -w "$p" ] || [ ! -w "$(dirname "$p")" ]; then
+            warn "Not removable by this user (admin-owned). This script never uses sudo."
+            warn "    Run from an ADMIN account:  sudo rm -rf \"$p\""
+            continue
+        fi
+        mkdir -p "$HOME/.Trash"
+        dest="$HOME/.Trash/$(basename "$p")"
+        if [ -e "$dest" ]; then dest="$dest.$(date +%Y%m%d%H%M%S)"; fi
+        mv "$p" "$dest" || { warn "Could not move $p"; continue; }
+        info "Moved to Trash: $dest"
+        if [ -x "$LSREGISTER" ]; then "$LSREGISTER" -u "$dest" >/dev/null 2>&1 || true; fi
+    done <<EOF
+$FOUND
+EOF
+
+    if [ -n "$bdirs" ]; then
+        while IFS= read -r p; do
+            [ -n "$p" ] || continue
+            printf '[?] Remove Homebrew metadata (app untouched): %s ? [y/N] ' "$p"
+            read -r ans </dev/tty || ans=""
+            case "$ans" in
+                y|Y|yes|YES) rm -rf "$p" && info "Removed: $p" ;;
+                *) info "Skipped." ;;
+            esac
+        done <<EOF
+$bdirs
+EOF
+    fi
+    info "Done. If another program still opens a different Firefox, run this"
+    info "command again, then log out/in so Launch Services rebuilds its handler list."
+}
+
 # --- dispatch ----------------------------------------------------------------
 
 CMD="${1:-setup}"
@@ -618,7 +774,8 @@ case "$CMD" in
     verify)         do_verify "${1:-}" ;;
     pack)           do_pack "${1:-}" ;;
     unpack)         do_unpack "${1:-}" ;;
+    cleanup)        do_cleanup "${1:-}" ;;
     help|-h|--help) usage ;;
     *)              usage; fail "Unknown command: $CMD" ;;
 esac
-# v10
+# 11

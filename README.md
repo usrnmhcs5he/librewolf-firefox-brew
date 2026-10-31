@@ -7,7 +7,7 @@
 ![Bash 3.2+](https://img.shields.io/badge/bash-3.2%2B-4EAA25?logo=gnubash&logoColor=white)
 ![macOS](https://img.shields.io/badge/macOS-no%20sudo-000000?logo=apple&logoColor=white)
 ![arkenfox](https://img.shields.io/badge/arkenfox-144.0-orange)
-![Version](https://img.shields.io/badge/version-10-blue)
+![Version](https://img.shields.io/badge/version-11-blue)
 
 </div>
 
@@ -87,6 +87,7 @@ chmod +x firefox-hardened-setup.sh
 | `verify` | Signature chain, Mozilla Team ID, Gatekeeper and writability posture. Run after every update. |
 | `pack [out.tar.gz]` | Verifies `user.js`, snapshots `containers.json` from the live profile, writes a manifest and the bundle. |
 | `unpack <bundle>` | Verifies the manifest, restores files next to the script, then runs `setup`. |
+| `cleanup [--remove]` | Finds other Firefox copies on the Mac and lists them with version, signer and owner. With `--remove`, asks per item and moves it to the Trash. See [Cleaning up other copies](#-cleaning-up-other-copies). |
 
 After the first launch, set the profile as default in `about:profiles` if you
 start Firefox from the Dock or Finder. Confirm policies in `about:policies`.
@@ -109,6 +110,30 @@ Machine A: pack  →  Machine B: admin installs Firefox  →  copy bundle + scri
 
 Then follow the manual steps the script prints: default profile, extensions,
 `about:policies`.
+
+## 🧹 Cleaning up other copies
+
+If another program opens a Firefox other than `/Applications/Firefox.app`, a
+leftover copy is registered with macOS. Typical sources: the old v4 Homebrew
+install in `~/Applications`, Nightly or Developer Edition, a mounted DMG, a
+copy in Downloads.
+
+```bash
+./firefox-hardened-setup.sh cleanup            # scan only, changes nothing
+./firefox-hardened-setup.sh cleanup --remove   # ask per item, move to Trash
+```
+
+- **Searches**: `~/Applications`, `/Applications`, Downloads, Desktop, mounted
+  `/Volumes`, Spotlight (release, Developer Edition and Nightly bundle IDs)
+  and Homebrew `Caskroom/firefox*` metadata.
+- **Keeps** `/Applications/Firefox.app` and refuses to run if it is missing.
+- **Safe removal**: apps go to the Trash (recoverable) and are unregistered
+  from Launch Services. Profiles and data are never touched. Homebrew items
+  are metadata only (never `brew uninstall`).
+- **No sudo**: admin-owned copies are listed with the `sudo rm -rf` command
+  for you to run from an admin account. Mounted DMGs get an eject command.
+- Needs a terminal and Firefox closed. After a removal, log out and in if
+  another program still shows the old copy.
 
 ## 📁 Files
 
@@ -185,5 +210,5 @@ behavior.
 
 ## 🕘 Version
 
-README revision 6, paired with script **v10**. The full v1–v10 changelog is in
+README revision 7, paired with script **v11**. The full v1–v11 changelog is in
 the script header.
